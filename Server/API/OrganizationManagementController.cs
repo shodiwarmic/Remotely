@@ -17,14 +17,16 @@ namespace Remotely.Server.API
     [ApiController]
     public class OrganizationManagementController : ControllerBase
     {
-        public OrganizationManagementController(DataService dataService, UserManager<RemotelyUser> userManager, IEmailSenderEx emailSender)
+        public OrganizationManagementController(IDataService dataService, 
+            UserManager<RemotelyUser> userManager, 
+            IEmailSenderEx emailSender)
         {
-            this.DataService = dataService;
-            this.UserManager = userManager;
-            this.EmailSender = emailSender;
+            DataService = dataService;
+            UserManager = userManager;
+            EmailSender = emailSender;
         }
 
-        private DataService DataService { get; }
+        private IDataService DataService { get; }
         private IEmailSenderEx EmailSender { get; }
         private UserManager<RemotelyUser> UserManager { get; }
 
@@ -262,7 +264,7 @@ namespace Remotely.Server.API
 
                 var inviteURL = $"{Request.Scheme}://{Request.Host}/Invite?id={newInvite.ID}";
                 var emailResult = await EmailSender.SendEmailAsync(invite.InvitedUser, "Invitation to Organization in Remotely",
-                            $@"<img src='https://remotely.one/media/Remotely_Logo.png'/>
+                            $@"<img src='{Request.Scheme}://{Request.Host}/images/Remotely_Logo.png'/>
                             <br><br>
                             Hello!
                             <br><br>

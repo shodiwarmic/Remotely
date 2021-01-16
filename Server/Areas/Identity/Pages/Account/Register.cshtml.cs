@@ -23,16 +23,16 @@ namespace Remotely.Server.Areas.Identity.Pages.Account
         private readonly UserManager<RemotelyUser> _userManager;
         private readonly ILogger<RegisterModel> _logger;
         private readonly IEmailSenderEx _emailSender;
-        private readonly DataService _dataService;
-        private readonly ApplicationConfig _appConfig;
+        private readonly IDataService _dataService;
+        private readonly IApplicationConfig _appConfig;
 
         public RegisterModel(
             UserManager<RemotelyUser> userManager,
             SignInManager<RemotelyUser> signInManager,
             ILogger<RegisterModel> logger,
             IEmailSenderEx emailSender,
-            DataService dataService,
-            ApplicationConfig appConfig)
+            IDataService dataService,
+            IApplicationConfig appConfig)
         {
             _userManager = userManager;
             _signInManager = signInManager;
@@ -89,7 +89,10 @@ namespace Remotely.Server.Areas.Identity.Pages.Account
                 {
                     UserName = Input.Email,
                     Email = Input.Email,
-                    IsServerAdmin = organizationCount == 0
+                    IsServerAdmin = organizationCount == 0,
+                    Organization = new Organization(),
+                    UserOptions = new RemotelyUserOptions(),
+                    IsAdministrator = true
                 };
                 var result = await _userManager.CreateAsync(user, Input.Password);
 
@@ -106,7 +109,7 @@ namespace Remotely.Server.Areas.Identity.Pages.Account
                         protocol: Request.Scheme);
 
                     await _emailSender.SendEmailAsync(Input.Email, "Confirm your email",
-                        $"<img src='https://remotely.one/media/Remotely_Logo.png'/><br><br>Please confirm your Remotely account by <a href='{HtmlEncoder.Default.Encode(callbackUrl)}'>clicking here</a>.");
+                        $"<img src='{Request.Scheme}://{Request.Host}/images/Remotely_Logo.png'/><br><br>Please confirm your Remotely account by <a href='{HtmlEncoder.Default.Encode(callbackUrl)}'>clicking here</a>.");
 
                     if (_userManager.Options.SignIn.RequireConfirmedAccount)
                     {

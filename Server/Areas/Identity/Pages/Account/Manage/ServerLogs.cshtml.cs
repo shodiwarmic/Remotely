@@ -5,12 +5,13 @@ using Remotely.Shared.Enums;
 using Remotely.Shared.Models;
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
 {
     public class ServerLogsModel : PageModel
     {
-        public ServerLogsModel(DataService dataService)
+        public ServerLogsModel(IDataService dataService)
         {
             DataService = dataService;
         }
@@ -21,7 +22,7 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
         public InputModel Input { get; set; } = new InputModel();
 
         public bool IsAdmin { get; private set; }
-        private DataService DataService { get; }
+        private IDataService DataService { get; }
 
         public void OnGet()
         {
@@ -54,9 +55,22 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
 
         }
 
-        public void OnPost()
+        public void OnPostApplyFilter()
         {
             PopulateViewModel();
+        }
+
+        public async Task<IActionResult> OnPostClearLogsAsync()
+        {
+            var currentUser = DataService.GetUserByName(User.Identity.Name);
+
+            if (!currentUser.IsAdministrator)
+            {
+                return Unauthorized();
+            }
+
+            await DataService.ClearLogs(User.Identity.Name);
+            return RedirectToPage();
         }
 
         public class InputModel

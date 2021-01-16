@@ -17,10 +17,10 @@ import {
 } from "./Interfaces/Dtos.js";
 import { ReceiveFile } from "./FileTransferService.js";
 
-
 export class DtoMessageHandler {
     MessagePack: any = window['MessagePack'];
-    PartialCaptureFrames: Uint8Array[] = [];
+    ImagePartials: Array<Uint8Array> = [];
+
     ParseBinaryMessage(data: ArrayBuffer) {
         var model = this.MessagePack.decode(data) as BaseDto;
         switch (model.DtoType) {
@@ -58,6 +58,7 @@ export class DtoMessageHandler {
     HandleAudioSample(audioSample: AudioSampleDto) {
         Sound.Play(audioSample.Buffer);
     }
+    
     HandleCaptureFrame(captureFrame: CaptureFrameDto) {
         if (UI.AutoQualityAdjustCheckBox.checked &&
             Number(UI.QualitySlider.value) != captureFrame.ImageQuality) {
@@ -65,8 +66,11 @@ export class DtoMessageHandler {
         }
 
         if (captureFrame.EndOfFrame) {
-            ViewerApp.MessageSender.SendFrameReceived();
-            var url = window.URL.createObjectURL(new Blob(this.PartialCaptureFrames));
+            let completedFrame = new Blob(this.ImagePartials);
+
+            this.ImagePartials = [];
+
+            var url = window.URL.createObjectURL(completedFrame);
             var img = document.createElement("img");
             img.onload = () => {
                 UI.Screen2DContext.drawImage(img,
@@ -77,12 +81,24 @@ export class DtoMessageHandler {
                 window.URL.revokeObjectURL(url);
             };
             img.src = url;
-            this.PartialCaptureFrames = [];
+
+            //createImageBitmap(completedFrame).then(bitmap => {
+            //    UI.Screen2DContext.drawImage(bitmap,
+            //        captureFrame.Left,
+            //        captureFrame.Top,
+            //        captureFrame.Width,
+            //        captureFrame.Height);
+
+            //    bitmap.close();
+            //})
+
+            ViewerApp.MessageSender.SendFrameReceived();
         }
         else {
-            this.PartialCaptureFrames.push(captureFrame.ImageBytes);
+            this.ImagePartials.push(captureFrame.ImageBytes);
         }
     }
+
     HandleClipboardText(clipboardText: ClipboardTextDto) {
         ViewerApp.ClipboardWatcher.SetClipboardText(clipboardText.ClipboardText);
         ShowMessage("Clipboard updated.");

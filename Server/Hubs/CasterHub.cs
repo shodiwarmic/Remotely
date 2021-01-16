@@ -14,7 +14,7 @@ namespace Remotely.Server.Hubs
         public CasterHub(IHubContext<BrowserHub> browserHub,
             IHubContext<ViewerHub> viewerHubContext,
             IHubContext<AgentHub> agentHubContext,
-            ApplicationConfig appConfig)
+            IApplicationConfig appConfig)
         {
             BrowserHubContext = browserHub;
             ViewerHubContext = viewerHubContext;
@@ -23,7 +23,7 @@ namespace Remotely.Server.Hubs
         }
 
         public static ConcurrentDictionary<string, RCSessionInfo> SessionInfoList { get; } = new ConcurrentDictionary<string, RCSessionInfo>();
-        public ApplicationConfig AppConfig { get; }
+        public IApplicationConfig AppConfig { get; }
         private IHubContext<AgentHub> AgentHubContext { get; }
         private IHubContext<BrowserHub> BrowserHubContext { get; }
         private RCSessionInfo SessionInfo
@@ -91,7 +91,8 @@ namespace Remotely.Server.Hubs
 
         public Task NotifyRequesterUnattendedReady(string browserHubConnectionID)
         {
-            return BrowserHubContext.Clients.Client(browserHubConnectionID).SendAsync("UnattendedSessionReady", Context.ConnectionId);
+            var deviceId = SessionInfoList[Context.ConnectionId].DeviceID;
+            return BrowserHubContext.Clients.Client(browserHubConnectionID).SendAsync("UnattendedSessionReady", Context.ConnectionId, deviceId);
         }
 
         public Task NotifyViewersRelaunchedScreenCasterReady(string[] viewerIDs)

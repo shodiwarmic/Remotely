@@ -40,11 +40,11 @@ namespace Remotely.Server
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            
+            services.AddDatabaseDeveloperPageExceptionFilter();
             var dbProvider = Configuration["ApplicationOptions:DBProvider"].ToLower();
             if (dbProvider == "sqlite")
             {
-                services.AddDbContext<ApplicationDbContext, SqliteDbContext>(options => 
+                services.AddDbContext<ApplicationDbContext, SqliteDbContext>(options =>
                     options.UseSqlite(Configuration.GetConnectionString("SQLite")));
             }
             else if (dbProvider == "sqlserver")
@@ -73,10 +73,13 @@ namespace Remotely.Server
                 });
             }
 
-            services.AddIdentity<RemotelyUser, IdentityRole>(options => options.Stores.MaxLengthForKeys = 128)
-                .AddEntityFrameworkStores<ApplicationDbContext>()
-                .AddDefaultUI()
-                .AddDefaultTokenProviders();
+            services.AddIdentity<RemotelyUser, IdentityRole>(options => { 
+                options.Stores.MaxLengthForKeys = 128;
+                options.Password.RequireNonAlphanumeric = false;
+            })
+            .AddEntityFrameworkStores<ApplicationDbContext>()
+            .AddDefaultUI()
+            .AddDefaultTokenProviders();
 
             var trustedOrigins = Configuration.GetSection("ApplicationOptions:TrustedCorsOrigins").Get<string[]>();
 
@@ -133,8 +136,8 @@ namespace Remotely.Server
             services.AddLogging();
             services.AddScoped<IEmailSenderEx, EmailSenderEx>();
             services.AddScoped<IEmailSender, EmailSender>();
-            services.AddScoped<DataService>();
-            services.AddSingleton<ApplicationConfig>();
+            services.AddScoped<IDataService, DataService>();
+            services.AddSingleton<IApplicationConfig, ApplicationConfig>();
             services.AddScoped<ApiAuthorizationFilter>();
             services.AddHostedService<CleanupService>();
             services.AddScoped<RemoteControlFilterAttribute>();
@@ -144,7 +147,7 @@ namespace Remotely.Server
         public void Configure(IApplicationBuilder app,
             IWebHostEnvironment env,
             ApplicationDbContext context,
-            DataService dataService,
+            IDataService dataService,
             ILoggerFactory loggerFactory)
         {
 
@@ -153,7 +156,7 @@ namespace Remotely.Server
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
-                app.UseDatabaseErrorPage();
+                app.UseMigrationsEndPoint();
             }
             else
             {

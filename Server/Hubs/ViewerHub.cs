@@ -14,18 +14,18 @@ namespace Remotely.Server.Hubs
     [ServiceFilter(typeof(RemoteControlFilterAttribute))]
     public class ViewerHub : Hub
     {
-        public ViewerHub(DataService dataService,
+        public ViewerHub(IDataService dataService,
             IHubContext<CasterHub> casterHubContext,
             IHubContext<AgentHub> agentHub,
-            ApplicationConfig appConfig)
+            IApplicationConfig appConfig)
         {
             DataService = dataService;
             CasterHubContext = casterHubContext;
             AgentHubContext = agentHub;
             AppConfig = appConfig;
         }
-        private ApplicationConfig AppConfig { get; set; }
-        private DataService DataService { get; }
+        private IApplicationConfig AppConfig { get; set; }
+        private IDataService DataService { get; }
 
         private RemoteControlMode Mode
         {
@@ -200,16 +200,23 @@ namespace Remotely.Server.Hubs
                 OrganizationID = orgId
             });
 
+
             if (Mode == RemoteControlMode.Unattended)
             {
+                var targetDevice = AgentHub.ServiceConnections[SessionInfo.ServiceID];
+
+                var useWebRtc = targetDevice.WebRtcSetting == WebRtcSetting.Default ?
+                            AppConfig.UseWebRtc :
+                            targetDevice.WebRtcSetting == WebRtcSetting.Enabled;
+
+
                 SessionInfo.Mode = RemoteControlMode.Unattended;
-                var deviceID = AgentHub.ServiceConnections[SessionInfo.ServiceID].ID;
 
                 if ((!string.IsNullOrWhiteSpace(otp) &&
-                        RemoteControlFilterAttribute.OtpMatchesDevice(otp, deviceID))
+                        RemoteControlFilterAttribute.OtpMatchesDevice(otp, targetDevice.ID))
                     ||
                     (Context.User.Identity.IsAuthenticated &&
-                        DataService.DoesUserHaveAccessToDevice(deviceID, Context.UserIdentifier)))
+                        DataService.DoesUserHaveAccessToDevice(targetDevice.ID, Context.UserIdentifier)))
                 {
                     var orgName = DataService.GetOrganizationNameById(orgId);
                     await CasterHubContext.Clients.Client(screenCasterID).SendAsync("GetScreenCast", 
@@ -217,6 +224,7 @@ namespace Remotely.Server.Hubs
                         RequesterName, 
                         AppConfig.RemoteControlNotifyUser,
                         AppConfig.EnforceAttendedAccess,
+                        useWebRtc,
                         orgName);
                 }
                 else
@@ -228,7 +236,7 @@ namespace Remotely.Server.Hubs
             {
                 SessionInfo.Mode = RemoteControlMode.Normal;
                 await Clients.Caller.SendAsync("RequestingScreenCast");
-                await CasterHubContext.Clients.Client(screenCasterID).SendAsync("RequestScreenCast", Context.ConnectionId, RequesterName, AppConfig.RemoteControlNotifyUser);
+                await CasterHubContext.Clients.Client(screenCasterID).SendAsync("RequestScreenCast", Context.ConnectionId, RequesterName, AppConfig.RemoteControlNotifyUser, AppConfig.UseWebRtc);
             }
         }
 

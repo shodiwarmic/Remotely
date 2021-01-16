@@ -15,7 +15,9 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
 {
     public class OrganizationModel : PageModel
     {
-        public OrganizationModel(DataService dataService, UserManager<RemotelyUser> userManager, IEmailSenderEx emailSender)
+        public OrganizationModel(IDataService dataService,
+            UserManager<RemotelyUser> userManager,
+            IEmailSenderEx emailSender)
         {
             DataService = dataService;
             UserManager = userManager;
@@ -40,7 +42,7 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
         [Display(Name = "Users")]
         public List<OrganizationUser> Users { get; set; }
 
-        private DataService DataService { get; }
+        private IDataService DataService { get; }
 
         private IEmailSenderEx EmailSender { get; }
 
@@ -125,7 +127,7 @@ namespace Remotely.Server.Areas.Identity.Pages.Account.Manage
 
                     var inviteURL = $"{Request.Scheme}://{Request.Host}/Invite?id={newInvite.ID}";
                     var emailResult = await EmailSender.SendEmailAsync(invite.InvitedUser, "Invitation to Organization in Remotely",
-                            $@"<img src='https://remotely.one/media/Remotely_Logo.png'/>
+                            $@"<img src='{Request.Scheme}://{Request.Host}/images/Remotely_Logo.png'/>
                             <br><br>
                             Hello!
                             <br><br>

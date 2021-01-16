@@ -24,9 +24,9 @@ param (
 
 
 $ErrorActionPreference = "Stop"
-$MSBuildPath = (Get-ChildItem -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\" -Recurse -Filter "MSBuild.exe" -File | ForEach-Object {
-    [System.Diagnostics.FileVersionInfo]::GetVersionInfo($_.FullName)
-} | Sort-Object -Property FileVersion -Descending | Select-Object -First 1).FileName
+$InstallerDir = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+$VsWhere = "$InstallerDir\vswhere.exe"
+$MSBuildPath = (&"$VsWhere" -latest -products * -find "\MSBuild\Current\Bin\MSBuild.exe").Trim()
 $Root = (Get-Item -Path $PSScriptRoot).Parent.FullName
 $SignAssemblies = $false
 
@@ -85,41 +85,46 @@ if ([string]::IsNullOrWhiteSpace($MSBuildPath) -or !(Test-Path -Path $MSBuildPat
     return
 }
 
-# Add Current Version file to root content folder for client update checks.
-# TODO: Remove after a few releases.
-Set-Content -Path "$Root\Server\CurrentVersion.txt" -Value $CurrentVersion.Trim() -Encoding UTF8 -Force
 
 # Update hostname.
 if ($Hostname.Length -gt 0) {
+    [Uri]$HostNameUri = $null
+
+    if (![System.Uri]::TryCreate($HostName, [System.UriKind]::Absolute, [ref] $HostNameUri) -or 
+        ($HostNameUri.Scheme -notlike [System.Uri]::UriSchemeHttp -and $HostNameUri.Scheme -notlike [System.Uri]::UriSchemeHttps)) {
+            Write-Error "`nThe HostName variable is not a valid HTTP Uri."
+            return
+    }
+
     Replace-LineInFile -FilePath "$Root\Desktop.Win\Services\Config.cs" -MatchPattern "public string Host " -ReplaceLineWith "public string Host { get; set; } = `"$($Hostname)`";" -MaxCount 1
     Replace-LineInFile -FilePath "$Root\Desktop.Linux\Services\Config.cs" -MatchPattern "public string Host " -ReplaceLineWith "public string Host { get; set; } = `"$($Hostname)`";" -MaxCount 1
     Replace-LineInFile -FilePath "$Root\Agent.Installer.Win\ViewModels\MainWindowViewModel.cs" -MatchPattern "private string serverUrl" -ReplaceLineWith "private string serverUrl = `"$($Hostname)`";" -MaxCount 1
 }
 else {
-    Write-Host "`nWARNING: No hostname parameter was specified.  The server name will need to be entered manually in the desktop client.`n" -ForegroundColor DarkYellow
+    Write-Warning "`nNo hostname parameter was specified.  The server name will need to be entered manually in the desktop client.`n"
 }
 
     
 # Clear publish folders.
-if ((Test-Path -Path "$Root\Agent\bin\Release\netcoreapp3.1\win10-x64\publish") -eq $true) {
-	Get-ChildItem -Path "$Root\Agent\bin\Release\netcoreapp3.1\win10-x64\publish" | Remove-Item -Force -Recurse
+if ((Test-Path -Path "$Root\Agent\bin\Release\net5.0\win10-x64\publish") -eq $true) {
+	Get-ChildItem -Path "$Root\Agent\bin\Release\net5.0\win10-x64\publish" | Remove-Item -Force -Recurse
 }
-if ((Test-Path -Path  "$Root\Agent\bin\Release\netcoreapp3.1\win10-x86\publish" ) -eq $true) {
-	Get-ChildItem -Path  "$Root\Agent\bin\Release\netcoreapp3.1\win10-x86\publish" | Remove-Item -Force -Recurse
+if ((Test-Path -Path  "$Root\Agent\bin\Release\net5.0\win10-x86\publish" ) -eq $true) {
+	Get-ChildItem -Path  "$Root\Agent\bin\Release\net5.0\win10-x86\publish" | Remove-Item -Force -Recurse
 }
-if ((Test-Path -Path "$Root\Agent\bin\Release\netcoreapp3.1\linux-x64\publish") -eq $true) {
-	Get-ChildItem -Path "$Root\Agent\bin\Release\netcoreapp3.1\linux-x64\publish" | Remove-Item -Force -Recurse
+if ((Test-Path -Path "$Root\Agent\bin\Release\net5.0\linux-x64\publish") -eq $true) {
+	Get-ChildItem -Path "$Root\Agent\bin\Release\net5.0\linux-x64\publish" | Remove-Item -Force -Recurse
 }
 
 
 # Publish Core clients.
-dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime win10-x64 --configuration Release --output "$Root\Agent\bin\Release\netcoreapp3.1\win10-x64\publish" "$Root\Agent"
-dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime linux-x64 --configuration Release --output "$Root\Agent\bin\Release\netcoreapp3.1\linux-x64\publish" "$Root\Agent"
-dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime win10-x86 --configuration Release --output "$Root\Agent\bin\Release\netcoreapp3.1\win10-x86\publish" "$Root\Agent"
+dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime win10-x64 --configuration Release --output "$Root\Agent\bin\Release\net5.0\win10-x64\publish" "$Root\Agent"
+dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime linux-x64 --configuration Release --output "$Root\Agent\bin\Release\net5.0\linux-x64\publish" "$Root\Agent"
+dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime win10-x86 --configuration Release --output "$Root\Agent\bin\Release\net5.0\win10-x86\publish" "$Root\Agent"
 
-New-Item -Path "$Root\Agent\bin\Release\netcoreapp3.1\win10-x64\publish\Desktop\" -ItemType Directory -Force
-New-Item -Path "$Root\Agent\bin\Release\netcoreapp3.1\win10-x86\publish\Desktop\" -ItemType Directory -Force
-New-Item -Path "$Root\Agent\bin\Release\netcoreapp3.1\linux-x64\publish\Desktop\" -ItemType Directory -Force
+New-Item -Path "$Root\Agent\bin\Release\net5.0\win10-x64\publish\Desktop\" -ItemType Directory -Force
+New-Item -Path "$Root\Agent\bin\Release\net5.0\win10-x86\publish\Desktop\" -ItemType Directory -Force
+New-Item -Path "$Root\Agent\bin\Release\net5.0\linux-x64\publish\Desktop\" -ItemType Directory -Force
 
 
 # Publish Linux ScreenCaster
@@ -179,21 +184,21 @@ if ($SignAssemblies) {
 }
 
 # Compress Core clients.
-$PublishDir =  "$Root\Agent\bin\Release\netcoreapp3.1\win10-x64\publish"
+$PublishDir =  "$Root\Agent\bin\Release\net5.0\win10-x64\publish"
 Compress-Archive -Path "$PublishDir\*" -DestinationPath "$PublishDir\Remotely-Win10-x64.zip" -CompressionLevel Optimal -Force
 while ((Test-Path -Path "$PublishDir\Remotely-Win10-x64.zip") -eq $false){
     Start-Sleep -Seconds 1
 }
 Move-Item -Path "$PublishDir\Remotely-Win10-x64.zip" -Destination "$Root\Server\wwwroot\Downloads\Remotely-Win10-x64.zip" -Force
 
-$PublishDir =  "$Root\Agent\bin\Release\netcoreapp3.1\win10-x86\publish"
+$PublishDir =  "$Root\Agent\bin\Release\net5.0\win10-x86\publish"
 Compress-Archive -Path "$PublishDir\*" -DestinationPath "$PublishDir\Remotely-Win10-x86.zip" -CompressionLevel Optimal -Force
 while ((Test-Path -Path "$PublishDir\Remotely-Win10-x86.zip") -eq $false){
     Start-Sleep -Seconds 1
 }
 Move-Item -Path "$PublishDir\Remotely-Win10-x86.zip" -Destination "$Root\Server\wwwroot\Downloads\Remotely-Win10-x86.zip" -Force
 
-$PublishDir =  "$Root\Agent\bin\Release\netcoreapp3.1\linux-x64\publish"
+$PublishDir =  "$Root\Agent\bin\Release\net5.0\linux-x64\publish"
 Compress-Archive -Path "$PublishDir\*" -DestinationPath "$PublishDir\Remotely-Linux.zip" -CompressionLevel Optimal -Force
 while ((Test-Path -Path "$PublishDir\Remotely-Linux.zip") -eq $false){
     Start-Sleep -Seconds 1
@@ -209,5 +214,5 @@ if ($RID.Length -gt 0 -and $OutDir.Length -gt 0) {
     dotnet publish /p:Version=$CurrentVersion /p:FileVersion=$CurrentVersion --runtime $RID --configuration Release --output $OutDir "$Root\Server\"
 }
 else {
-    Write-Host "`r`nSkipping server deployment.  Params -outdir and -rid not specified." -ForegroundColor DarkYellow
+    Write-Host "`nSkipping server deployment.  Params -outdir and -rid not specified." -ForegroundColor DarkYellow
 }

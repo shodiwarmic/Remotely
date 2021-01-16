@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Remotely.Server.Services;
 using Remotely.Shared.Enums;
 using Remotely.Shared.Models;
@@ -13,30 +14,45 @@ namespace Remotely.Server.Hubs
 {
     public class AgentHub : Hub
     {
-        public AgentHub(DataService dataService,
+        public AgentHub(IDataService dataService,
+            IApplicationConfig appConfig,
             IHubContext<BrowserHub> browserHubContext,
             IHubContext<ViewerHub> viewerHubContext)
         {
             DataService = dataService;
             BrowserHubContext = browserHubContext;
             ViewerHubContext = viewerHubContext;
+            AppConfig = appConfig;
         }
 
-        public static ConcurrentDictionary<string, Device> ServiceConnections { get; } = new ConcurrentDictionary<string, Device>();
         public static IMemoryCache ApiScriptResults { get; } = new MemoryCache(new MemoryCacheOptions());
+        public static ConcurrentDictionary<string, Device> ServiceConnections { get; } = new ConcurrentDictionary<string, Device>();
+        public IApplicationConfig AppConfig { get; }
         public IHubContext<ViewerHub> ViewerHubContext { get; }
         private IHubContext<BrowserHub> BrowserHubContext { get; }
-        private DataService DataService { get; }
+        private IDataService DataService { get; }
         private Device Device
         {
             get
             {
-                return this.Context.Items["Device"] as Device;
+                return Context.Items["Device"] as Device;
             }
             set
             {
-                this.Context.Items["Device"] = value;
+                Context.Items["Device"] = value;
             }
+        }
+
+        public void AddDeviceAlert(string alertMessage)
+        {
+
+            var options = new AlertOptions()
+            {
+                AlertDeviceID = Device.ID,
+                AlertMessage = alertMessage,
+                ShouldAlert = true
+            };
+            DataService.AddAlert(options, Device.OrganizationID);
         }
 
         public Task BashResultViaAjax(string commandID)
@@ -81,6 +97,11 @@ namespace Remotely.Server.Hubs
         {
             try
             {
+                if (CheckForDeviceBan(device.ID, device.DeviceName))
+                {
+                    return Task.FromResult(false);
+                }
+
                 if (ServiceConnections.Any(x => x.Value.ID == device.ID))
                 {
                     DataService.WriteEvent(new EventLog()
@@ -98,6 +119,11 @@ namespace Remotely.Server.Hubs
                     ip = ip.MapToIPv4();
                 }
                 device.PublicIP = ip?.ToString();
+
+                if (CheckForDeviceBan(device.PublicIP))
+                {
+                    return Task.FromResult(false);
+                }
 
                 if (DataService.AddOrUpdateDevice(device, out var updatedDevice))
                 {
@@ -125,7 +151,7 @@ namespace Remotely.Server.Hubs
             }
             catch (Exception ex)
             {
-                DataService.WriteEvent(ex, Device?.OrganizationID);
+                DataService.WriteEvent(ex, device?.OrganizationID);
             }
 
             Context.Abort();
@@ -134,14 +160,27 @@ namespace Remotely.Server.Hubs
 
         public Task DeviceHeartbeat(Device device)
         {
+            if (CheckForDeviceBan(device.ID, device.DeviceName))
+            {
+                return Task.CompletedTask;
+            }
+
             var ip = Context.GetHttpContext()?.Connection?.RemoteIpAddress;
             if (ip != null && ip.IsIPv4MappedToIPv6)
             {
                 ip = ip.MapToIPv4();
             }
             device.PublicIP = ip?.ToString();
+
+            if (CheckForDeviceBan(device.PublicIP))
+            {
+                return Task.CompletedTask;
+            }
+
+
             DataService.AddOrUpdateDevice(device, out var updatedDevice);
             Device = updatedDevice;
+            ServiceConnections.AddOrUpdate(Context.ConnectionId, Device, (id, d) => Device);
 
             var userIDs = BrowserHub.ConnectionIdToUserLookup.Values.Select(x => x.Id);
 
@@ -160,39 +199,42 @@ namespace Remotely.Server.Hubs
         {
             return BrowserHubContext.Clients.Client(requesterID).SendAsync("DisplayMessage", consoleMessage, popupMessage);
         }
+
         public Task DownloadFile(string fileID, string requesterID)
         {
             return BrowserHubContext.Clients.Client(requesterID).SendAsync("DownloadFile", fileID);
         }
+
         public Task DownloadFileProgress(int progressPercent, string requesterID)
         {
             return BrowserHubContext.Clients.Client(requesterID).SendAsync("DownloadFileProgress", progressPercent);
         }
 
-        public override Task OnConnectedAsync()
-        {
-            return base.OnConnectedAsync();
-        }
         public override async Task OnDisconnectedAsync(Exception exception)
         {
-            if (Device != null)
+            try
             {
-                DataService.DeviceDisconnected(Device.ID);
+                if (Device != null)
+                {
+                    DataService.DeviceDisconnected(Device.ID);
 
-                Device.IsOnline = false;
+                    Device.IsOnline = false;
 
-                var connectionIds = BrowserHub.ConnectionIdToUserLookup
-                                                   .Where(x => x.Value.OrganizationID == Device.OrganizationID)
-                                                   .Select(x => x.Key)
-                                                   .ToList();
+                    var connectionIds = BrowserHub.ConnectionIdToUserLookup
+                                                       .Where(x => x.Value.OrganizationID == Device.OrganizationID)
+                                                       .Select(x => x.Key)
+                                                       .ToList();
 
-                await BrowserHubContext.Clients.Clients(connectionIds).SendAsync("DeviceWentOffline", Device);
-
-                ServiceConnections.Remove(Context.ConnectionId, out _);
+                    await BrowserHubContext.Clients.Clients(connectionIds).SendAsync("DeviceWentOffline", Device);
+                }
             }
-
-            await base.OnDisconnectedAsync(exception);
+            finally
+            {
+                ServiceConnections.TryRemove(Context.ConnectionId, out _);
+                await base.OnDisconnectedAsync(exception);
+            }
         }
+
         public Task PSCoreResult(PSCoreCommandResult result)
         {
             result.DeviceID = Device.ID;
@@ -201,6 +243,7 @@ namespace Remotely.Server.Hubs
             DataService.AddOrUpdateCommandResult(commandResult);
             return BrowserHubContext.Clients.Client(commandResult.SenderConnectionID).SendAsync("PSCoreResult", result);
         }
+
         public async void PSCoreResultViaAjax(string commandID)
         {
             var commandResult = DataService.GetCommandResult(commandID);
@@ -216,6 +259,7 @@ namespace Remotely.Server.Hubs
         {
             return Clients.Caller.SendAsync("ServerVerificationToken", Device.ServerVerificationToken);
         }
+
         public void SetServerVerificationToken(string verificationToken)
         {
             Device.ServerVerificationToken = verificationToken;
@@ -226,10 +270,33 @@ namespace Remotely.Server.Hubs
         {
             return BrowserHubContext.Clients.Client(requesterID).SendAsync("TransferCompleted", transferID);
         }
+
         public Task WinPSResultViaAjax(string commandID)
         {
             var commandResult = DataService.GetCommandResult(commandID);
             return BrowserHubContext.Clients.Client(commandResult.SenderConnectionID).SendAsync("WinPSResultViaAjax", commandID, Device.ID);
+        }
+
+        private bool CheckForDeviceBan(params string[] deviceIdNameOrIPs)
+        {
+            foreach (var device in deviceIdNameOrIPs)
+            {
+                if (string.IsNullOrWhiteSpace(device))
+                {
+                    continue;
+                }
+
+                if (AppConfig.BannedDevices.Any(x => !string.IsNullOrWhiteSpace(x) &&
+                    x.Equals(device, StringComparison.OrdinalIgnoreCase)))
+                {
+                    DataService.WriteEvent($"Device ID/name/IP ({device}) is banned.  Sending uninstall command.", null);
+
+                    _ = Clients.Caller.SendAsync("UninstallAgent");
+                    return true;
+                }
+            }
+           
+            return false;
         }
     }
 }
