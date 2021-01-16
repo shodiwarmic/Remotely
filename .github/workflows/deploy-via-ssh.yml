@@ -147,7 +147,7 @@ jobs:
         $Minute = $VersionDate.Minute.ToString().PadLeft(2, "0")
         $CurrentVersion = "$Year.$Month.$Day.$Hour$Minute"
         
-        echo "::set-env name=CurrentVersion::$CurrentVersion"
+        echo "CurrentVersion=$CurrentVersion" >> $GITHUB_ENV
         # This was needed in Azure Pipelines.
         #[System.Console]::WriteLine("##vso[task.setvariable variable=CurrentVersion]$CurrentVersion")
 
