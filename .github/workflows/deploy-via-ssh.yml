@@ -104,7 +104,7 @@ jobs:
 
     # Install the .NET Core workload
     - name: Install .NET Core
-      uses: actions/setup-dotnet@v1.6.0
+      uses: actions/setup-dotnet@v1.7.2
       
     # Add  MSBuild to the PATH: https://github.com/microsoft/setup-msbuild
     - name: Setup MSBuild.exe
@@ -196,4 +196,4 @@ jobs:
     - name: Publish
       shell: bash
       run: | 
-        rsync -r -v -W ./artifact/ $SshUsername@$SshHostname:/var/www/remotely/
+        rsync -r -v ./artifact/ $SshUsername@$SshHostname:/var/www/remotely/
