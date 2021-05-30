@@ -1070,9 +1070,10 @@ namespace Remotely.Shared.Win32
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT
         {
-            public Int32 x;
-            public Int32 y;
+            public int x;
+            public int y;
         }
+
 
         [StructLayout(LayoutKind.Sequential)]
         public struct CursorInfo

@@ -4,6 +4,7 @@ using Remotely.Agent.Interfaces;
 using Remotely.Agent.Services;
 using Remotely.Shared.Enums;
 using Remotely.Shared.Utilities;
+using Remotely.Shared.Services;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -18,15 +19,17 @@ namespace Remotely.Agent
 
         public static IServiceProvider Services { get; set; }
 
-        public static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
             try
             {
                 BuildServices();
 
-                Task.Run(() => { _ = Init(); });
+                await Init();
 
-                Thread.Sleep(Timeout.Infinite);
+                _ = Task.Run(Services.GetRequiredService<AgentSocket>().HandleConnection);
+
+                await Task.Delay(-1);
 
             }
             catch (Exception ex)
@@ -45,28 +48,31 @@ namespace Remotely.Agent
             });
             serviceCollection.AddSingleton<AgentSocket>();
             serviceCollection.AddScoped<ChatClientService>();
-            serviceCollection.AddTransient<Bash>();
-            serviceCollection.AddTransient<CMD>();
             serviceCollection.AddTransient<PSCore>();
-            serviceCollection.AddTransient<WindowsPS>();
+            serviceCollection.AddTransient<ExternalScriptingShell>();
             serviceCollection.AddScoped<ConfigService>();
             serviceCollection.AddScoped<Uninstaller>();
-            serviceCollection.AddScoped<ScriptRunner>();
-            serviceCollection.AddScoped<CommandExecutor>();
+            serviceCollection.AddScoped<ScriptExecutor>();
+            serviceCollection.AddScoped<IProcessInvoker, ProcessInvoker>();
+            serviceCollection.AddScoped<IWebClientEx, WebClientEx>();
 
             if (EnvironmentHelper.IsWindows)
             {
                 serviceCollection.AddScoped<IAppLauncher, AppLauncherWin>();
                 serviceCollection.AddSingleton<IUpdater, UpdaterWin>();
+                serviceCollection.AddSingleton<IDeviceInformationService, DeviceInformationServiceWin>();
             }
             else if (EnvironmentHelper.IsLinux)
             {
                 serviceCollection.AddScoped<IAppLauncher, AppLauncherLinux>();
                 serviceCollection.AddSingleton<IUpdater, UpdaterLinux>();
+                serviceCollection.AddSingleton<IDeviceInformationService, DeviceInformationServiceLinux>();
             }
             else if (EnvironmentHelper.IsMac)
             {
-                // TODO: Mac.
+                serviceCollection.AddScoped<IAppLauncher, AppLauncherMac>();
+                serviceCollection.AddSingleton<IUpdater, UpdaterMac>();
+                serviceCollection.AddSingleton<IDeviceInformationService, DeviceInformationServiceMac>();
             }
             else
             {
@@ -113,10 +119,6 @@ namespace Remotely.Agent
             catch (Exception ex)
             {
                 Logger.Write(ex);
-            }
-            finally
-            {
-                await Services.GetRequiredService<AgentSocket>().HandleConnection();
             }
         }
 

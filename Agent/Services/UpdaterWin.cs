@@ -1,7 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Win32;
-using Remotely.Agent.Interfaces;
-using Remotely.Agent.Utilities;
+﻿using Remotely.Agent.Interfaces;
 using Remotely.Shared.Utilities;
 using System;
 using System.Diagnostics;
@@ -14,17 +11,20 @@ namespace Remotely.Agent.Services
 {
     public class UpdaterWin : IUpdater
     {
-        public UpdaterWin(ConfigService configService)
+        private readonly SemaphoreSlim _checkForUpdatesLock = new SemaphoreSlim(1, 1);
+        private readonly ConfigService _configService;
+        private readonly IWebClientEx _webClientEx;
+        private readonly SemaphoreSlim _installLatestVersionLock = new SemaphoreSlim(1, 1);
+        private readonly System.Timers.Timer _updateTimer = new System.Timers.Timer(TimeSpan.FromHours(6).TotalMilliseconds);
+        private DateTimeOffset _lastUpdateFailure;
+
+
+        public UpdaterWin(ConfigService configService, IWebClientEx webClientEx)
         {
-            ConfigService = configService;
+            _configService = configService;
+            _webClientEx = webClientEx;
+            _webClientEx.SetRequestTimeout((int)_updateTimer.Interval);
         }
-
-        private SemaphoreSlim CheckForUpdatesLock { get; } = new SemaphoreSlim(1, 1);
-        private ConfigService ConfigService { get; }
-        private SemaphoreSlim InstallLatestVersionLock { get; } = new SemaphoreSlim(1, 1);
-        private bool PreviousUpdateFailed { get; set; }
-        private System.Timers.Timer UpdateTimer { get; } = new System.Timers.Timer(TimeSpan.FromHours(6).TotalMilliseconds);
-
 
         public async Task BeginChecking()
         {
@@ -33,39 +33,34 @@ namespace Remotely.Agent.Services
                 return;
             }
 
-            if (!RegistryHelper.CheckNetFrameworkVersion())
-            {
-                return;
-            }
-
             await CheckForUpdates();
-            UpdateTimer.Elapsed += UpdateTimer_Elapsed;
-            UpdateTimer.Start();
+            _updateTimer.Elapsed += UpdateTimer_Elapsed;
+            _updateTimer.Start();
         }
 
         public async Task CheckForUpdates()
         {
             try
             {
-                await CheckForUpdatesLock.WaitAsync();
+                await _checkForUpdatesLock.WaitAsync();
 
                 if (EnvironmentHelper.IsDebug)
                 {
                     return;
                 }
 
-                if (PreviousUpdateFailed)
+                if (_lastUpdateFailure.AddDays(1) > DateTimeOffset.Now)
                 {
-                    Logger.Write("Skipping update check due to previous failure.  Restart the service to try again, or manually install the update.");
+                    Logger.Write("Skipping update check due to previous failure.  Updating will be tried again after 24 hours have passed.");
                     return;
                 }
 
 
-                var connectionInfo = ConfigService.GetConnectionInfo();
-                var serverUrl = ConfigService.GetConnectionInfo().Host;
+                var connectionInfo = _configService.GetConnectionInfo();
+                var serverUrl = _configService.GetConnectionInfo().Host;
 
                 var platform = Environment.Is64BitOperatingSystem ? "x64" : "x86";
-                var fileUrl = serverUrl + $"/Downloads/Remotely-Win10-{platform}.zip";
+                var fileUrl = serverUrl + $"/Content/Remotely-Win10-{platform}.zip";
 
                 var lastEtag = string.Empty;
 
@@ -103,33 +98,37 @@ namespace Remotely.Agent.Services
             }
             finally
             {
-                CheckForUpdatesLock.Release();
+                _checkForUpdatesLock.Release();
             }
+        }
+
+        public void Dispose()
+        {
+            _webClientEx?.Dispose();
         }
 
         public async Task InstallLatestVersion()
         {
             try
             {
-                await InstallLatestVersionLock.WaitAsync();
+                await _installLatestVersionLock.WaitAsync();
 
-                var connectionInfo = ConfigService.GetConnectionInfo();
+                var connectionInfo = _configService.GetConnectionInfo();
                 var serverUrl = connectionInfo.Host;
 
                 Logger.Write("Service Updater: Downloading install package.");
 
-                using var wc = new WebClientEx((int)UpdateTimer.Interval);
                 var downloadId = Guid.NewGuid().ToString();
                 var zipPath = Path.Combine(Path.GetTempPath(), "RemotelyUpdate.zip");
 
                 var installerPath = Path.Combine(Path.GetTempPath(), "Remotely_Installer.exe");
                 var platform = Environment.Is64BitOperatingSystem ? "x64" : "x86";
 
-                await wc.DownloadFileTaskAsync(
-                     serverUrl + $"/Downloads/Remotely_Installer.exe",
+                await _webClientEx.DownloadFileTaskAsync(
+                     serverUrl + $"/Content/Remotely_Installer.exe",
                      installerPath);
 
-                await wc.DownloadFileTaskAsync(
+                await _webClientEx.DownloadFileTaskAsync(
                    serverUrl + $"/api/AgentUpdate/DownloadPackage/win-{platform}/{downloadId}",
                    zipPath);
 
@@ -148,37 +147,22 @@ namespace Remotely.Agent.Services
             catch (WebException ex) when (ex.Status == WebExceptionStatus.Timeout)
             {
                 Logger.Write("Timed out while waiting to download update.", Shared.Enums.EventType.Warning);
-                PreviousUpdateFailed = true;
+                _lastUpdateFailure = DateTimeOffset.Now;
             }
             catch (Exception ex)
             {
                 Logger.Write(ex);
-                PreviousUpdateFailed = true;
+                _lastUpdateFailure = DateTimeOffset.Now;
             }
             finally
             {
-                InstallLatestVersionLock.Release();
+                _installLatestVersionLock.Release();
             }
         }
 
         private async void UpdateTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
             await CheckForUpdates();
-        }
-        private class WebClientEx : WebClient
-        {
-            private readonly int _requestTimeout;
-
-            public WebClientEx(int requestTimeout)
-            {
-                _requestTimeout = requestTimeout;
-            }
-            protected override WebRequest GetWebRequest(Uri uri)
-            {
-                WebRequest webRequest = base.GetWebRequest(uri);
-                webRequest.Timeout = _requestTimeout;
-                return webRequest;
-            }
         }
     }
 }
